@@ -23,3 +23,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+# Documentation
+
+- [Wiki](https://github.com/KoNekoD/miksher-pw/wiki)
