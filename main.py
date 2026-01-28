@@ -126,30 +126,12 @@ def get_mic_list() -> List[StereoInput]:
             continue
         if sink.left.name != 'input_FL':
             continue
+        if sink.left.device == 'Регулятор громкости PulseAudio':
+            continue
 
         mic_list.append(sink)
 
     return mic_list
-
-
-def pw_dump():
-    res = subprocess.run(
-        ["pw-dump"],
-        stdout=subprocess.PIPE,
-        check=True,
-    ).stdout.decode("utf-8").strip()
-
-    json_decoded = json.loads(res)
-
-    links_list = []
-
-    for item in json_decoded:
-        if item['type'] != 'PipeWire:Interface:Link':
-            continue
-
-        links_list.append({'input': item['info']['input-port-id'], 'output': item['info']['output-port-id']})
-
-    return links_list
 
 
 def get_outputs_list(mic_names_list: List[str]) -> List[StereoOutput]:
@@ -171,12 +153,44 @@ def get_outputs_list(mic_names_list: List[str]) -> List[StereoOutput]:
 
 
 def is_do_not_needed_link(mic: StereoInput, out: StereoOutput):
-    links_list = pw_dump()
+    res = subprocess.run(["pw-dump"], stdout=subprocess.PIPE, check=True).stdout.decode("utf-8").strip()
+    json_decoded = json.loads(res)
 
+    # If already linked
+    links_list = []
+    for item in json_decoded:
+        if item['type'] == 'PipeWire:Interface:Link':
+            links_list.append({'input': item['info']['input-port-id'], 'output': item['info']['output-port-id']})
     for link_item in links_list:
         if link_item['input'] == int(mic.left.id) and link_item['output'] == int(out.left.id):
             return True
 
+    # If same process.id
+    for item in json_decoded:
+        if item['type'] == 'PipeWire:Interface:Port':
+            if item['id'] == int(mic.left.id) or item['id'] == int(mic.right.id):
+                in_node_id = item['info']['props']['node.id']
+
+                # Found mic node if, get program process id
+                for item2 in json_decoded:
+                    if item2['type'] == 'PipeWire:Interface:Node':
+                        if item2['id'] == in_node_id:
+                            mic_process_id = item2['info']['props']['application.process.id']
+
+                            # Found mic process id, get out process id
+                            for item3 in json_decoded:
+                                if item3['type'] == 'PipeWire:Interface:Port':
+                                    if item3['id'] == int(out.left.id) or item3['id'] == int(out.right.id):
+                                        out_node_id = item3['info']['props']['node.id']
+
+                                        # Found out node if, get program process id
+                                        for item4 in json_decoded:
+                                            if item4['type'] == 'PipeWire:Interface:Node':
+                                                if item4['id'] == out_node_id:
+                                                    out_process_id = item4.get('info', {}).get('props', {}).get('application.process.id')
+
+                                                    if mic_process_id == out_process_id:
+                                                        return True
     return False
 
 
@@ -199,6 +213,8 @@ def check_update():
                     continue
                 out.connect(mic)
                 print(f"|> Connected {out.left.device} to {mic.left.device}")
+            except KeyError as e:
+                raise e
             except Exception as e:
                 print(f"[X] Failed to connect {out} to {mic}: {e}")
 
